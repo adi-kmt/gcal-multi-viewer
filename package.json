@@ -1,0 +1,33 @@
+{
+  "name": "gcal-multi-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fullcalendar/core": "latest",
+    "@fullcalendar/daygrid": "latest",
+    "@fullcalendar/interaction": "latest",
+    "@fullcalendar/react": "latest",
+    "@fullcalendar/timegrid": "latest",
+    "@supabase/supabase-js": "latest",
+    "googleapis": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "overrides": {
+    "postcss": "^8.5.15"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest",
+    "vitest": "^4.1.8"
+  }
+}
