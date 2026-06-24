@@ -777,9 +777,16 @@ input {
   letter-spacing: 0.05em;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
   width: 100%;
   box-sizing: border-box;
+}
+
+.modal-time-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
 }
 
 .modal-actions {
@@ -882,12 +889,17 @@ input {
 
 /* Events */
 .fc-event {
-  border: none !important;
+  border: 1px solid rgba(10, 12, 16, 0.72) !important;
   border-radius: 6px !important;
   margin: 1px 4px !important;
-  padding: 2px 4px;
+  padding: 0;
   font-size: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 1px 3px rgba(0,0,0,0.24);
+}
+
+.fc-event-main {
+  min-width: 0;
+  height: 100%;
 }
 
 .fc .fc-daygrid-more-link {
@@ -947,7 +959,7 @@ input {
 .fc .fc-popover-body .fc-event {
   margin: 0 !important;
   min-height: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border: 1px solid rgba(10, 12, 16, 0.72) !important;
 }
 
 .fc .fc-popover-body .fc-event-main {
@@ -958,52 +970,19 @@ input {
 .custom-event {
   min-width: 0;
   width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   overflow: hidden;
-  color: #fff;
-}
-
-.event-user-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.42);
-}
-
-.event-label {
-  flex-shrink: 0;
-  opacity: 0.82;
-  font-size: 10px;
+  padding: 3px 5px;
+  text-align: center;
 }
 
 .event-conflict {
-  outline: 1px solid rgba(255, 226, 154, 0.9);
+  outline: 1px solid rgba(255, 226, 154, 0.86);
   outline-offset: -1px;
-}
-
-.conflict-pill {
-  flex-shrink: 0;
-  border-radius: 4px;
-  padding: 1px 4px;
-  background: rgba(255, 226, 154, 0.92);
-  color: #2b040a;
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.custom-event .event-tag {
-  background: rgba(0, 0, 0, 0.28);
-  color: white;
-  font-size: 9px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 4px;
-  text-transform: uppercase;
-  flex-shrink: 0;
-  line-height: 1.2;
 }
 
 .custom-event .event-title {
@@ -1012,13 +991,8 @@ input {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 500;
-}
-
-.custom-event .event-time {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.8;
-  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
 }
 
 .modal-time-preview {

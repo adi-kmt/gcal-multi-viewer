@@ -30,6 +30,7 @@ type CalendarEvent = {
   allDay?: boolean;
   backgroundColor: string;
   borderColor: string;
+  textColor?: string;
   extendedProps: {
     userNickname: string;
     calendarName: string;
@@ -121,6 +122,23 @@ function getDefaultEventSelection() {
   };
 }
 
+function toDateTimeLocalValue(isoValue: string) {
+  const date = new Date(isoValue);
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function fromDateTimeLocalValue(value: string) {
+  return new Date(value).toISOString();
+}
+
+function parseAttendeeEmails(value: string) {
+  return value
+    .split(/[\s,;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function GoogleAuthScreen() {
   return (
     <div className="join-screen welcome-stage">
@@ -187,6 +205,56 @@ function hslToHex(h: number, s: number, l: number): string {
     return Math.round(255 * color).toString(16).padStart(2, '0');
   };
   return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function hexToRgba(hex: string, alpha: number) {
+  const normalized = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#828DB0';
+  const r = parseInt(normalized.slice(1, 3), 16);
+  const g = parseInt(normalized.slice(3, 5), 16);
+  const b = parseInt(normalized.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function darkenHex(hex: string, amount: number) {
+  const [h, s, l] = hexToHsl(/^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#828DB0');
+  return hslToHex(h, Math.min(80, s + 10), Math.max(10, l - amount));
+}
+
+function getReadableEventStyle(baseColor: string) {
+  const safeColor = /^#[0-9a-fA-F]{6}$/.test(baseColor) ? baseColor : '#828DB0';
+  return {
+    backgroundColor: hexToRgba(safeColor, 0.7),
+    borderColor: darkenHex(safeColor, 34),
+    textColor: darkenHex(safeColor, 48),
+  };
+}
+
+function styleEventWithColor(event: CalendarEvent, baseColor: string): CalendarEvent {
+  const style = getReadableEventStyle(baseColor);
+  return {
+    ...event,
+    ...style,
+  };
+}
+
+function dedupeEquivalentEvents(eventsToDedupe: CalendarEvent[]) {
+  const seen = new Set<string>();
+  const deduped: CalendarEvent[] = [];
+
+  for (const event of eventsToDedupe) {
+    const key = [
+      event.title.trim().toLowerCase(),
+      event.start,
+      event.end,
+      event.extendedProps.userNickname.trim().toLowerCase(),
+    ].join('::');
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(event);
+  }
+
+  return deduped;
 }
 
 /** Generate N perceptually distinct shades from a base hue */
@@ -260,8 +328,7 @@ function buildDemoEvents(room: RoomState): CalendarEvent[] {
           title: userTitles[calIndex] || `${cal.name} block`,
           start: d(calIndex, firstHour, 0),
           end: d(calIndex, firstHour + 1, 0),
-          backgroundColor: cal.shade,
-          borderColor: cal.shade,
+          ...getReadableEventStyle(cal.shade),
           extendedProps: { userNickname: user.nickname, calendarName: cal.name },
         },
         {
@@ -269,8 +336,7 @@ function buildDemoEvents(room: RoomState): CalendarEvent[] {
           title: userTitles[calIndex + 2] || `${cal.name} review`,
           start: d(calIndex + 1, secondHour, 30),
           end: d(calIndex + 1, secondHour + 1, 30),
-          backgroundColor: cal.shade,
-          borderColor: cal.shade,
+          ...getReadableEventStyle(cal.shade),
           extendedProps: { userNickname: user.nickname, calendarName: cal.name },
         },
       ];
@@ -499,8 +565,11 @@ export default function CalendarView() {
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalSelection, setModalSelection] = useState<{ startStr: string; endStr: string } | null>(null);
   const [eventTitle, setEventTitle] = useState('');
+  const [eventStart, setEventStart] = useState('');
+  const [eventEnd, setEventEnd] = useState('');
+  const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [attendeeEmails, setAttendeeEmails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date>(new Date());
 
@@ -525,9 +594,8 @@ export default function CalendarView() {
     return eventsToColor.map((event) => {
       const accountId = event.extendedProps.accountId;
       const override = accountId ? overrides[accountId] : undefined;
-      return override
-        ? { ...event, backgroundColor: override, borderColor: override }
-        : event;
+      if (override) return styleEventWithColor(event, override);
+      return event.textColor ? event : styleEventWithColor(event, event.backgroundColor);
     });
   }
 
@@ -620,6 +688,21 @@ export default function CalendarView() {
     }
   }, [authUser, currentUser, room]);
 
+  useEffect(() => {
+    if (!selectedAccountId && connectedAccounts.length > 0) {
+      setSelectedAccountId(connectedAccounts[0].id);
+    }
+  }, [connectedAccounts, selectedAccountId]);
+
+  function openEventModal(selection: { startStr: string; endStr: string }) {
+    setEventStart(toDateTimeLocalValue(selection.startStr));
+    setEventEnd(toDateTimeLocalValue(selection.endStr));
+    setEventTitle('');
+    setAttendeeEmails('');
+    setSelectedAccountId((current) => current || connectedAccounts[0]?.id || '');
+    setIsModalOpen(true);
+  }
+
   function enterRoom(nextRoom: RoomState, me: UserSlot, nextEvents: CalendarEvent[], shouldPersist = true) {
     setRoom(nextRoom);
     setCurrentUser(me);
@@ -669,6 +752,7 @@ export default function CalendarView() {
         ...event,
         backgroundColor: event.backgroundColor || me.baseColor,
         borderColor: event.borderColor || event.backgroundColor || me.baseColor,
+        textColor: event.textColor,
         extendedProps: {
           userNickname: event.extendedProps?.userNickname || me.nickname,
           calendarName: event.extendedProps?.calendarName || 'Google Calendar',
@@ -783,11 +867,11 @@ export default function CalendarView() {
     await loadGoogleEvents(me, { roomCode: newRoom.roomCode });
   }
 
-  const visibleEvents = events.filter((ev) => {
+  const visibleEvents = useMemo(() => dedupeEquivalentEvents(events.filter((ev) => {
     const user = ev.extendedProps.userNickname;
     const calKey = `${user}::${ev.extendedProps.calendarName}`;
     return !hiddenUsers.has(user) && !hiddenCals.has(calKey);
-  });
+  })), [events, hiddenUsers, hiddenCals]);
   const conflictGroups = useMemo(() => detectConflictGroups(visibleEvents), [visibleEvents]);
   const conflictedEventIds = useMemo(() => getConflictedEventIds(visibleEvents), [visibleEvents]);
   const joinDefaults = currentUser
@@ -812,28 +896,58 @@ export default function CalendarView() {
   }
 
   function handleDateSelect(selection: DateSelectArg) {
-    setModalSelection({ startStr: selection.startStr, endStr: selection.endStr });
-    setEventTitle('');
-    setIsModalOpen(true);
+    openEventModal({ startStr: selection.startStr, endStr: selection.endStr });
   }
 
-  function handleCreateEvent(e: React.FormEvent) {
+  async function handleCreateEvent(e: React.FormEvent) {
     e.preventDefault();
-    if (!eventTitle || !modalSelection || !currentUser) return;
+    if (!eventTitle || !currentUser) return;
+    if (!selectedAccountId) {
+      setRoomNotice('Connect a Google account before creating calendar events.');
+      return;
+    }
+
+    const startIso = fromDateTimeLocalValue(eventStart);
+    const endIso = fromDateTimeLocalValue(eventEnd);
+    if (Date.parse(startIso) >= Date.parse(endIso)) {
+      setRoomNotice('Event end time must be after the start time.');
+      return;
+    }
+
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      const shade = currentUser.calendars[0]?.shade || currentUser.baseColor;
+    try {
+      const response = await fetch('/api/google/create-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: selectedAccountId,
+          title: eventTitle,
+          start: startIso,
+          end: endIso,
+          attendeeEmails: parseAttendeeEmails(attendeeEmails),
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || 'Could not create Google Calendar event');
+      }
+
+      const account = connectedAccounts.find((candidate) => candidate.id === selectedAccountId);
+      const accountColor = account
+        ? accountColorOverrides[account.id] || account.base_color || currentUser.baseColor
+        : currentUser.baseColor;
       const newEv: CalendarEvent = {
-        id: Date.now().toString(),
+        id: `created:${selectedAccountId}:${body.event?.id || Date.now()}`,
         title: eventTitle,
-        start: modalSelection.startStr,
-        end: modalSelection.endStr,
-        backgroundColor: shade,
-        borderColor: shade,
+        start: startIso,
+        end: endIso,
+        ...getReadableEventStyle(accountColor),
         extendedProps: {
-          userNickname: currentUser.nickname,
-          calendarName: currentUser.calendars[0]?.name || 'Work',
+          userNickname: account?.user_nickname || currentUser.nickname,
+          calendarName: 'Primary',
+          accountEmail: account?.google_email,
+          accountId: selectedAccountId,
         },
       };
       setEvents((prev) => {
@@ -842,16 +956,22 @@ export default function CalendarView() {
         return nextEvents;
       });
       setLastSynced(new Date());
-      setIsSubmitting(false);
       setIsModalOpen(false);
-    }, 400);
+      setRoomNotice('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not create Google Calendar event';
+      setRoomNotice(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function renderEventContent(eventInfo: EventContentArg) {
     return (
-      <div className={`custom-event ${conflictedEventIds.has(eventInfo.event.id) ? 'event-conflict' : ''}`}>
-        <span className="event-user-dot" style={{ background: eventInfo.event.backgroundColor }} />
-        {conflictedEventIds.has(eventInfo.event.id) && <span className="conflict-pill">Conflict</span>}
+      <div
+        className={`custom-event ${conflictedEventIds.has(eventInfo.event.id) ? 'event-conflict' : ''}`}
+        style={{ color: eventInfo.event.textColor || '#101216' }}
+      >
         <span className="event-title">{eventInfo.event.title}</span>
       </div>
     );
@@ -934,9 +1054,7 @@ export default function CalendarView() {
         <button
           className="primary-btn new-event-btn"
           onClick={() => {
-            setModalSelection(getDefaultEventSelection());
-            setEventTitle('');
-            setIsModalOpen(true);
+            openEventModal(getDefaultEventSelection());
           }}
         >
           + New Event
@@ -1034,7 +1152,7 @@ export default function CalendarView() {
         <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h2>New Event</h2>
-            <p className="modal-sub">Will be added to <strong>{currentUser.nickname}</strong>'s calendars</p>
+            <p className="modal-sub">Create this in Google Calendar and send invites.</p>
             <form onSubmit={handleCreateEvent}>
               <div className="form-group">
                 <label>Event Title</label>
@@ -1047,20 +1165,54 @@ export default function CalendarView() {
                   onChange={(e) => setEventTitle(e.target.value)}
                 />
               </div>
-              {modalSelection && (
-                <div className="modal-time-preview">
-                  <span>🕐</span>
-                  <span>
-                    {new Date(modalSelection.startStr).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    {' → '}
-                    {new Date(modalSelection.endStr).toLocaleString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+              <div className="form-group">
+                <label>Calendar Account</label>
+                <select
+                  required
+                  value={selectedAccountId}
+                  onChange={(e) => setSelectedAccountId(e.target.value)}
+                >
+                  {connectedAccounts.length === 0 && <option value="">Connect a Google account first</option>}
+                  {connectedAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.google_email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="modal-time-grid">
+                <div className="form-group">
+                  <label>Start</label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={eventStart}
+                    onChange={(e) => setEventStart(e.target.value)}
+                  />
                 </div>
-              )}
+                <div className="form-group">
+                  <label>End</label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={eventEnd}
+                    onChange={(e) => setEventEnd(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Invite Emails</label>
+                <input
+                  type="text"
+                  placeholder="name@example.com, team@example.com"
+                  value={attendeeEmails}
+                  onChange={(e) => setAttendeeEmails(e.target.value)}
+                />
+              </div>
               <div className="modal-actions">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="cancel-btn">Cancel</button>
                 <button type="submit" className="primary-btn" disabled={isSubmitting}>
-                  {isSubmitting ? 'Saving…' : 'Save Event'}
+                  {isSubmitting ? 'Creating...' : 'Create Event'}
                 </button>
               </div>
             </form>
