@@ -995,6 +995,20 @@ input {
   line-height: 1.15;
 }
 
+.custom-event .event-time {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  opacity: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
+.fc .fc-popover-body .custom-event {
+  justify-content: flex-start;
+  text-align: left;
+}
+
 .modal-time-preview {
   display: flex;
   gap: 8px;

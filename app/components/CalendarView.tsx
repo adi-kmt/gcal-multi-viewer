@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { DateSelectArg, EventClickArg, EventContentArg } from '@fullcalendar/core';
+import type { DateClickArg } from '@fullcalendar/interaction';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -899,6 +900,12 @@ export default function CalendarView() {
     openEventModal({ startStr: selection.startStr, endStr: selection.endStr });
   }
 
+  function handleDateClick(info: DateClickArg) {
+    if (info.view.type === 'dayGridMonth') {
+      info.view.calendar.changeView('timeGridDay', info.date);
+    }
+  }
+
   async function handleCreateEvent(e: React.FormEvent) {
     e.preventDefault();
     if (!eventTitle || !currentUser) return;
@@ -967,11 +974,14 @@ export default function CalendarView() {
   }
 
   function renderEventContent(eventInfo: EventContentArg) {
+    const showTime = eventInfo.view.type === 'dayGridMonth' && Boolean(eventInfo.timeText);
+
     return (
       <div
         className={`custom-event ${conflictedEventIds.has(eventInfo.event.id) ? 'event-conflict' : ''}`}
         style={{ color: eventInfo.event.textColor || '#101216' }}
       >
+        {showTime && <span className="event-time">{eventInfo.timeText}</span>}
         <span className="event-title">{eventInfo.event.title}</span>
       </div>
     );
@@ -1133,6 +1143,7 @@ export default function CalendarView() {
           selectable
           selectMirror
           select={handleDateSelect}
+          dateClick={handleDateClick}
           eventContent={renderEventContent}
           height="100%"
           dayMaxEvents={true}
