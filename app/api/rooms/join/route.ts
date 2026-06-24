@@ -44,6 +44,15 @@ export async function POST(req: NextRequest) {
       return jsonError(memberError.message, 500);
     }
 
+    await supabaseAdmin
+      .from('connected_google_accounts')
+      .update({
+        room_id: room.id,
+        user_nickname: String(nickname).trim(),
+        base_color: String(baseColor),
+      })
+      .eq('app_user_id', appUserId);
+
     const { data: members, error: membersError } = await supabaseAdmin
       .from('room_members')
       .select('nickname, base_color')

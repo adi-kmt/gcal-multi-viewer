@@ -27,11 +27,14 @@ type CalendarEvent = {
   title: string;
   start: string;
   end: string;
+  allDay?: boolean;
   backgroundColor: string;
   borderColor: string;
   extendedProps: {
     userNickname: string;
     calendarName: string;
+    accountEmail?: string;
+    accountId?: string;
   };
 };
 
@@ -49,6 +52,60 @@ type AuthUser = {
   name?: string;
   picture?: string;
 };
+
+type ConnectedAccount = {
+  id: string;
+  google_email: string;
+  created_at: string;
+  user_nickname?: string | null;
+  base_color?: string | null;
+};
+
+type AccountColorMap = Record<string, string>;
+
+type PersistedRoomSession = {
+  room: RoomState;
+  currentUser: UserSlot;
+};
+
+type JoinDefaults = {
+  nickname: string;
+  baseColor: string;
+};
+
+type LoadEventsOptions = {
+  mode?: 'replace' | 'missing';
+  knownEvents?: CalendarEvent[];
+  accountId?: string;
+};
+
+function getRoomStorageKey(email: string) {
+  return `unify.activeRoom.${email.toLowerCase()}`;
+}
+
+function getProfileStorageKey(email: string) {
+  return `unify.profile.${email.toLowerCase()}`;
+}
+
+function getEventCacheKey(email: string, roomCode: string) {
+  return `unify.events.${email.toLowerCase()}.${roomCode}`;
+}
+
+function getAccountColorStorageKey(email: string) {
+  return `unify.accountColors.${email.toLowerCase()}`;
+}
+
+function readStoredAccountColors(email: string): AccountColorMap {
+  const rawColors = window.localStorage.getItem(getAccountColorStorageKey(email));
+  if (!rawColors) return {};
+
+  try {
+    return JSON.parse(rawColors) as AccountColorMap;
+  } catch {
+    window.localStorage.removeItem(getAccountColorStorageKey(email));
+    return {};
+  }
+}
 
 function GoogleAuthScreen() {
   return (
@@ -214,7 +271,7 @@ const COLOR_PRESETS = [
 ];
 
 // ─── Join Room Screen ─────────────────────────────────────────────────────────
-function JoinRoomScreen({ onJoin }: { onJoin: (payload: JoinRoomPayload) => void }) {
+function JoinRoomScreen({ onJoin, defaults }: { onJoin: (payload: JoinRoomPayload) => void; defaults?: JoinDefaults | null }) {
   const [mode, setMode] = useState<'landing' | 'create' | 'join'>('landing');
   const [nickname, setNickname] = useState('');
   const [roomName, setRoomName] = useState('');
@@ -222,6 +279,7 @@ function JoinRoomScreen({ onJoin }: { onJoin: (payload: JoinRoomPayload) => void
   const [roomPassword, setRoomPassword] = useState('');
   const [baseColor, setBaseColor] = useState(COLOR_PRESETS[0]);
   const [customColor, setCustomColor] = useState('');
+  const hasJoinDefaults = Boolean(defaults?.nickname && defaults?.baseColor);
 
   function generateRoomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -233,14 +291,16 @@ function JoinRoomScreen({ onJoin }: { onJoin: (payload: JoinRoomPayload) => void
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (mode === 'landing') return;
-    if (!nickname.trim() || !roomCode.trim() || !roomPassword.trim()) return;
+    const resolvedNickname = nickname.trim() || defaults?.nickname || '';
+    const resolvedBaseColor = nickname.trim() ? baseColor : defaults?.baseColor || baseColor;
+    if (!resolvedNickname || !roomCode.trim() || !roomPassword.trim()) return;
     onJoin({
       mode,
-      nickname: nickname.trim(),
+      nickname: resolvedNickname,
       roomName: roomName.trim() || roomCode.trim().toUpperCase(),
       roomCode: roomCode.trim().toUpperCase(),
       roomPassword: roomPassword.trim(),
-      baseColor,
+      baseColor: resolvedBaseColor,
     });
   }
 
@@ -302,19 +362,29 @@ function JoinRoomScreen({ onJoin }: { onJoin: (payload: JoinRoomPayload) => void
             : 'Enter the room details shared by the host.'}
         </p>
         <form onSubmit={handleSubmit} className="join-form">
-          <div className="form-group">
-            <label>Your Nickname</label>
-            <input
-              type="text"
-              placeholder="e.g. Aditya"
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-              required
-              autoFocus
-            />
-          </div>
+          {(mode === 'create' || !hasJoinDefaults) && (
+            <div className="form-group">
+              <label>Your Nickname</label>
+              <input
+                type="text"
+                placeholder="e.g. Aditya"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                required={mode === 'create' || !hasJoinDefaults}
+                autoFocus
+              />
+            </div>
+          )}
 
-          <div className="form-group">
+          {mode === 'join' && hasJoinDefaults && (
+            <div className="known-profile">
+              <span>Joining as</span>
+              <strong>{defaults?.nickname}</strong>
+            </div>
+          )}
+
+          {mode === 'create' && (
+            <div className="form-group">
             <label>Room Name</label>
             <input
               type="text"
@@ -322,7 +392,8 @@ function JoinRoomScreen({ onJoin }: { onJoin: (payload: JoinRoomPayload) => void
               value={roomName}
               onChange={(e) => setRoomName(e.target.value)}
             />
-          </div>
+            </div>
+          )}
 
           <div className="form-group">
             <label>Room Code</label>
@@ -353,7 +424,8 @@ function JoinRoomScreen({ onJoin }: { onJoin: (payload: JoinRoomPayload) => void
             />
           </div>
 
-          <div className="form-group">
+          {(mode === 'create' || !hasJoinDefaults) && (
+            <div className="form-group">
             <label>Your Colour</label>
             <p className="color-hint">All your calendars will be shades of this colour.</p>
             <div className="color-presets">
@@ -384,7 +456,8 @@ function JoinRoomScreen({ onJoin }: { onJoin: (payload: JoinRoomPayload) => void
                 </div>
               ))}
             </div>
-          </div>
+            </div>
+          )}
 
           <button type="submit" className="primary-btn" style={{ width: '100%', marginTop: 8 }}>
             {mode === 'create' ? 'Create & Enter Room' : 'Join Room'}
@@ -405,6 +478,10 @@ export default function CalendarView() {
   const [hiddenCals, setHiddenCals] = useState<Set<string>>(new Set());
   const [showRoomIntro, setShowRoomIntro] = useState(false);
   const [roomNotice, setRoomNotice] = useState('');
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
+  const [accountColorOverrides, setAccountColorOverrides] = useState<AccountColorMap>({});
+  const [savedJoinDefaults, setSavedJoinDefaults] = useState<JoinDefaults | null>(null);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -413,12 +490,79 @@ export default function CalendarView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date>(new Date());
 
+  async function loadConnectedAccounts(overrides = accountColorOverrides): Promise<ConnectedAccount[]> {
+    try {
+      const response = await fetch('/api/google/accounts');
+      if (!response.ok) return [];
+      const body = await response.json();
+      const accounts = ((body.accounts || []) as ConnectedAccount[]).map((account) => ({
+        ...account,
+        base_color: overrides[account.id] || account.base_color,
+      }));
+      setConnectedAccounts(accounts);
+      return accounts;
+    } catch {
+      setConnectedAccounts([]);
+      return [];
+    }
+  }
+
+  function applyAccountColor(eventsToColor: CalendarEvent[], overrides = accountColorOverrides) {
+    return eventsToColor.map((event) => {
+      const accountId = event.extendedProps.accountId;
+      const override = accountId ? overrides[accountId] : undefined;
+      return override
+        ? { ...event, backgroundColor: override, borderColor: override }
+        : event;
+    });
+  }
+
+  function persistEventCache(nextEvents: CalendarEvent[]) {
+    if (!authUser || !room) return;
+    window.localStorage.setItem(getEventCacheKey(authUser.email, room.roomCode), JSON.stringify(nextEvents));
+  }
+
+  function updateAccountColor(accountId: string, baseColor: string) {
+    if (!authUser) return;
+
+    const nextOverrides = { ...accountColorOverrides, [accountId]: baseColor };
+    setAccountColorOverrides(nextOverrides);
+    window.localStorage.setItem(getAccountColorStorageKey(authUser.email), JSON.stringify(nextOverrides));
+
+    setConnectedAccounts((prev) => prev.map((account) => (
+      account.id === accountId ? { ...account, base_color: baseColor } : account
+    )));
+
+    setEvents((prev) => {
+      const nextEvents = applyAccountColor(prev, nextOverrides);
+      if (room) {
+        window.localStorage.setItem(getEventCacheKey(authUser.email, room.roomCode), JSON.stringify(nextEvents));
+      }
+      return nextEvents;
+    });
+  }
+
   useEffect(() => {
     let isMounted = true;
     fetch('/api/auth/me')
       .then((response) => response.ok ? response.json() : { user: null })
       .then((body) => {
-        if (isMounted) setAuthUser(body.user);
+        if (isMounted) {
+          setAuthUser(body.user);
+          if (body.user) {
+            const storedColors = readStoredAccountColors(body.user.email);
+            setAccountColorOverrides(storedColors);
+            void loadConnectedAccounts(storedColors);
+            const rawProfile = window.localStorage.getItem(getProfileStorageKey(body.user.email));
+            if (rawProfile) {
+              try {
+                setSavedJoinDefaults(JSON.parse(rawProfile) as JoinDefaults);
+              } catch {
+                window.localStorage.removeItem(getProfileStorageKey(body.user.email));
+              }
+            }
+          }
+        }
       })
       .catch(() => {
         if (isMounted) setAuthUser(null);
@@ -429,13 +573,137 @@ export default function CalendarView() {
     };
   }, []);
 
-  function enterRoom(nextRoom: RoomState, me: UserSlot, nextEvents: CalendarEvent[]) {
+  useEffect(() => {
+    if (!authUser || room || currentUser) return;
+
+    const raw = window.localStorage.getItem(getRoomStorageKey(authUser.email));
+    if (!raw) return;
+
+    try {
+      const persisted = JSON.parse(raw) as PersistedRoomSession;
+      if (!persisted.room || !persisted.currentUser) return;
+      setRoom(persisted.room);
+      setCurrentUser(persisted.currentUser);
+      setLastSynced(new Date());
+      const cachedEventsRaw = window.localStorage.getItem(getEventCacheKey(authUser.email, persisted.room.roomCode));
+      let cachedEvents: CalendarEvent[] = [];
+      if (cachedEventsRaw) {
+        try {
+          const storedColors = readStoredAccountColors(authUser.email);
+          cachedEvents = applyAccountColor(JSON.parse(cachedEventsRaw) as CalendarEvent[], storedColors);
+          setEvents(cachedEvents);
+        } catch {
+          window.localStorage.removeItem(getEventCacheKey(authUser.email, persisted.room.roomCode));
+        }
+      }
+      void loadGoogleEvents(persisted.currentUser, {
+        mode: cachedEvents.length > 0 ? 'missing' : 'replace',
+        knownEvents: cachedEvents,
+      });
+    } catch {
+      window.localStorage.removeItem(getRoomStorageKey(authUser.email));
+    }
+  }, [authUser, currentUser, room]);
+
+  function enterRoom(nextRoom: RoomState, me: UserSlot, nextEvents: CalendarEvent[], shouldPersist = true) {
     setRoom(nextRoom);
     setCurrentUser(me);
     setEvents(nextEvents);
     setLastSynced(new Date());
+    if (authUser && shouldPersist) {
+      window.localStorage.setItem(
+        getRoomStorageKey(authUser.email),
+        JSON.stringify({ room: nextRoom, currentUser: me } satisfies PersistedRoomSession),
+      );
+      const profile = { nickname: me.nickname, baseColor: me.baseColor };
+      window.localStorage.setItem(getProfileStorageKey(authUser.email), JSON.stringify(profile));
+      setSavedJoinDefaults(profile);
+    }
     setShowRoomIntro(true);
     window.setTimeout(() => setShowRoomIntro(false), 2200);
+  }
+
+  function mergeEvents(existingEvents: CalendarEvent[], incomingEvents: CalendarEvent[]) {
+    const byId = new Map(existingEvents.map((event) => [event.id, event]));
+    incomingEvents.forEach((event) => byId.set(event.id, event));
+    return Array.from(byId.values());
+  }
+
+  async function fetchGoogleEventsForRange(me: UserSlot, accountId?: string) {
+    const timeMin = new Date();
+    timeMin.setDate(timeMin.getDate() - 14);
+    const timeMax = new Date();
+    timeMax.setDate(timeMax.getDate() + 45);
+    const params = new URLSearchParams({
+      timeMin: timeMin.toISOString(),
+      timeMax: timeMax.toISOString(),
+    });
+    if (accountId) params.set('accountId', accountId);
+
+    const response = await fetch(`/api/google/events?${params.toString()}`);
+    const body = await response.json();
+
+    if (!response.ok) {
+      throw new Error(body.error || 'Could not load Google Calendar events');
+    }
+
+    return ((body.events || []) as CalendarEvent[])
+      .filter((event: Partial<CalendarEvent>) => event.id && event.title && event.start && event.end)
+      .map((event: CalendarEvent) => ({
+        ...event,
+        backgroundColor: event.backgroundColor || me.baseColor,
+        borderColor: event.borderColor || event.backgroundColor || me.baseColor,
+        extendedProps: {
+          userNickname: event.extendedProps?.userNickname || me.nickname,
+          calendarName: event.extendedProps?.calendarName || 'Google Calendar',
+          accountEmail: event.extendedProps?.accountEmail,
+          accountId: event.extendedProps?.accountId,
+        },
+      }));
+  }
+
+  async function loadGoogleEvents(me: UserSlot, options: LoadEventsOptions = {}) {
+    setIsLoadingEvents(true);
+    try {
+      const activeOverrides = authUser ? readStoredAccountColors(authUser.email) : accountColorOverrides;
+      const accounts = await loadConnectedAccounts(activeOverrides);
+      const existingEvents = options.knownEvents || events;
+      const knownAccountIds = new Set(
+        existingEvents
+          .map((event) => event.extendedProps.accountId)
+          .filter(Boolean) as string[],
+      );
+      const accountIdsToFetch = options.accountId
+        ? [options.accountId]
+        : options.mode === 'missing'
+          ? accounts.map((account) => account.id).filter((id) => !knownAccountIds.has(id))
+          : [];
+
+      const fetchedEvents = options.mode === 'missing'
+        ? accountIdsToFetch.length > 0
+          ? (await Promise.all(accountIdsToFetch.map((accountId) => fetchGoogleEventsForRange(me, accountId)))).flat()
+          : []
+        : await fetchGoogleEventsForRange(me, options.accountId);
+
+      const googleEvents = applyAccountColor(fetchedEvents, activeOverrides);
+      const nextEvents = options.mode === 'missing'
+        ? mergeEvents(existingEvents, googleEvents)
+        : googleEvents;
+
+      setEvents(nextEvents);
+      persistEventCache(nextEvents);
+      setLastSynced(new Date());
+      setRoomNotice(
+        nextEvents.length > 0
+          ? ''
+          : 'Google Calendar connected, but no events were found in the current date range.',
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load Google Calendar events';
+      setRoomNotice(`Room joined, but Google Calendar events could not be loaded: ${message}`);
+    } finally {
+      setIsLoadingEvents(false);
+    }
   }
 
   function buildUser(nickname: string, baseColor: string): UserSlot {
@@ -454,7 +722,7 @@ export default function CalendarView() {
   async function handleJoin(payload: JoinRoomPayload) {
     if (payload.nickname === '__DEMO__') {
       const me = DEMO_ROOM.users[0];
-      enterRoom(DEMO_ROOM, me, buildDemoEvents(DEMO_ROOM));
+      enterRoom(DEMO_ROOM, me, buildDemoEvents(DEMO_ROOM), false);
       return;
     }
 
@@ -492,7 +760,8 @@ export default function CalendarView() {
       users,
     };
 
-    enterRoom(newRoom, me, buildDemoEvents(newRoom));
+    enterRoom(newRoom, me, []);
+    await loadGoogleEvents(me);
   }
 
   const visibleEvents = events.filter((ev) => {
@@ -502,6 +771,9 @@ export default function CalendarView() {
   });
   const conflictGroups = useMemo(() => detectConflictGroups(visibleEvents), [visibleEvents]);
   const conflictedEventIds = useMemo(() => getConflictedEventIds(visibleEvents), [visibleEvents]);
+  const joinDefaults = currentUser
+    ? { nickname: currentUser.nickname, baseColor: currentUser.baseColor }
+    : savedJoinDefaults;
 
   function toggleUser(nickname: string) {
     setHiddenUsers((prev) => {
@@ -553,12 +825,9 @@ export default function CalendarView() {
   }
 
   function renderEventContent(eventInfo: EventContentArg) {
-    const user = eventInfo.event.extendedProps.userNickname;
-    const cal = eventInfo.event.extendedProps.calendarName;
     return (
       <div className={`custom-event ${conflictedEventIds.has(eventInfo.event.id) ? 'event-conflict' : ''}`}>
         <span className="event-user-dot" style={{ background: eventInfo.event.backgroundColor }} />
-        <span className="event-label">{user} · {cal}</span>
         {conflictedEventIds.has(eventInfo.event.id) && <span className="conflict-pill">Conflict</span>}
         <span className="event-title">{eventInfo.event.title}</span>
       </div>
@@ -575,7 +844,7 @@ export default function CalendarView() {
 
   // If room not set, show join screen
   if (!room || !currentUser) {
-    return <JoinRoomScreen onJoin={handleJoin} />;
+    return <JoinRoomScreen onJoin={handleJoin} defaults={joinDefaults} />;
   }
 
   return (
@@ -603,6 +872,42 @@ export default function CalendarView() {
           <strong>{authUser.email}</strong>
         </div>
 
+        <div className="connected-accounts">
+          <div className="connected-accounts-header">
+            <span>Calendar Accounts</span>
+            <strong>{connectedAccounts.length}</strong>
+          </div>
+          {connectedAccounts.length > 0 ? (
+            <div className="connected-account-list">
+              {connectedAccounts.map((account) => {
+                const accountColor = accountColorOverrides[account.id] || account.base_color || '#828DB0';
+                return (
+                  <div key={account.id} className="connected-account-item">
+                    <input
+                      type="color"
+                      className="account-color-input"
+                      value={accountColor}
+                      onChange={(event) => void updateAccountColor(account.id, event.target.value)}
+                      title={`Change colour for ${account.google_email}`}
+                      aria-label={`Change colour for ${account.google_email}`}
+                    />
+                    <span className="account-legend-copy">
+                      <strong>{account.user_nickname || currentUser.nickname}</strong>
+                      <span>{account.google_email}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p>No calendar accounts connected yet.</p>
+          )}
+          <a className="connect-account-btn" href="/api/google/auth?connect=1">
+            <span className="google-mini-icon" aria-hidden="true">G</span>
+            <span>Connect Google account</span>
+          </a>
+        </div>
+
         <button className="primary-btn new-event-btn" onClick={() => setIsModalOpen(true)}>
           + New Event
         </button>
@@ -623,24 +928,6 @@ export default function CalendarView() {
                   {isMe && <span className="you-badge">you</span>}
                   <span className="toggle-icon">{isUserHidden ? '◉' : '●'}</span>
                 </button>
-                {!isUserHidden && (
-                  <div className="legend-cals">
-                    {user.calendars.map((cal) => {
-                      const key = `${user.nickname}::${cal.name}`;
-                      const isCalHidden = hiddenCals.has(key);
-                      return (
-                        <button
-                          key={cal.name}
-                          className={`legend-cal-item ${isCalHidden ? 'dimmed' : ''}`}
-                          onClick={() => toggleCal(user.nickname, cal.name)}
-                        >
-                          <div className="legend-cal-dot" style={{ background: cal.shade }} />
-                          <span>{cal.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             );
           })}
@@ -650,10 +937,24 @@ export default function CalendarView() {
           <div className="sync-status">
             <div className="sync-dot" />
             <span>Synced · {lastSynced.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <button
+              className="sync-refresh-btn"
+              onClick={() => void loadGoogleEvents(currentUser)}
+              disabled={isLoadingEvents}
+              title="Resync calendars"
+              type="button"
+            >
+              {isLoadingEvents ? 'Syncing' : 'Resync'}
+            </button>
           </div>
           <button
             className="leave-btn"
-            onClick={() => { setRoom(null); setCurrentUser(null); }}
+            onClick={() => {
+              if (authUser) window.localStorage.removeItem(getRoomStorageKey(authUser.email));
+              setRoom(null);
+              setCurrentUser(null);
+              setEvents([]);
+            }}
           >
             Leave Room
           </button>
@@ -663,6 +964,7 @@ export default function CalendarView() {
       {/* ── Main ── */}
       <div className="main-content">
         {roomNotice && <div className="room-notice">{roomNotice}</div>}
+        {isLoadingEvents && <div className="room-notice">Loading Google Calendar events...</div>}
         {conflictGroups.length > 0 && (
           <div className="conflict-summary">
             <strong>{conflictGroups.length} overlap{conflictGroups.length === 1 ? '' : 's'} in view</strong>

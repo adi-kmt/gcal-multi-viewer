@@ -26,16 +26,23 @@ export async function GET(req: NextRequest) {
   try {
     const timeMin = req.nextUrl.searchParams.get('timeMin') || new Date().toISOString();
     const timeMax = req.nextUrl.searchParams.get('timeMax') || new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
+    const accountId = req.nextUrl.searchParams.get('accountId');
 
     if (Number.isNaN(Date.parse(timeMin)) || Number.isNaN(Date.parse(timeMax)) || Date.parse(timeMin) >= Date.parse(timeMax)) {
       return NextResponse.json({ error: 'timeMin and timeMax must be valid date-times, with timeMax after timeMin' }, { status: 400 });
     }
 
     const appUserId = getAppUserId(req);
-    const { data: accounts, error } = await supabaseAdmin
+    let accountQuery = supabaseAdmin
       .from('connected_google_accounts')
       .select('*')
       .eq('app_user_id', appUserId);
+
+    if (accountId) {
+      accountQuery = accountQuery.eq('id', accountId);
+    }
+
+    const { data: accounts, error } = await accountQuery;
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -62,7 +69,9 @@ export async function GET(req: NextRequest) {
             maxResults: 250,
           });
 
-          const assignedTheme = getHashColor(cal.id);
+          const assignedTheme = account.base_color
+            ? { name: 'ACCOUNT', hex: account.base_color }
+            : getHashColor(account.google_email);
           const tagName = cal.summary ? cal.summary.substring(0, 8).toUpperCase() : assignedTheme.name;
 
           for (const event of events.data.items || []) {
@@ -83,6 +92,7 @@ export async function GET(req: NextRequest) {
                   accountEmail: account.google_email,
                   calendarId: cal.id,
                   calendarName: cal.summary || '',
+                  userNickname: account.user_nickname || account.app_user_id,
                   tagName,
                 },
               },

@@ -51,6 +51,15 @@ export async function POST(req: NextRequest) {
       return jsonError(memberError?.message || 'Could not create room member', 500);
     }
 
+    await supabaseAdmin
+      .from('connected_google_accounts')
+      .update({
+        room_id: room.id,
+        user_nickname: String(nickname).trim(),
+        base_color: String(baseColor),
+      })
+      .eq('app_user_id', appUserId);
+
     return NextResponse.json({ room, members: [member] });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not create room';
