@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useRef, useEffect, useMemo, useState } from 'react';
 import type { DateSelectArg, EventClickArg, EventContentArg } from '@fullcalendar/core';
 import type { DateClickArg } from '@fullcalendar/interaction';
 import FullCalendar from '@fullcalendar/react';
@@ -557,6 +557,7 @@ export default function CalendarView() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [hiddenUsers, setHiddenUsers] = useState<Set<string>>(new Set());
   const [hiddenCals, setHiddenCals] = useState<Set<string>>(new Set());
+  const [hiddenAccountIds, setHiddenAccountIds] = useState<Set<string>>(new Set());
   const [showRoomIntro, setShowRoomIntro] = useState(false);
   const [roomNotice, setRoomNotice] = useState('');
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
@@ -573,6 +574,8 @@ export default function CalendarView() {
   const [attendeeEmails, setAttendeeEmails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date>(new Date());
+  const accountLongPressTimer = useRef<number | null>(null);
+  const accountLongPressTriggered = useRef(false);
 
   async function loadConnectedAccounts(overrides = accountColorOverrides): Promise<ConnectedAccount[]> {
     try {
@@ -871,8 +874,9 @@ export default function CalendarView() {
   const visibleEvents = useMemo(() => dedupeEquivalentEvents(events.filter((ev) => {
     const user = ev.extendedProps.userNickname;
     const calKey = `${user}::${ev.extendedProps.calendarName}`;
-    return !hiddenUsers.has(user) && !hiddenCals.has(calKey);
-  })), [events, hiddenUsers, hiddenCals]);
+    const accountId = ev.extendedProps.accountId;
+    return !hiddenUsers.has(user) && !hiddenCals.has(calKey) && (!accountId || !hiddenAccountIds.has(accountId));
+  })), [events, hiddenUsers, hiddenCals, hiddenAccountIds]);
   const conflictGroups = useMemo(() => detectConflictGroups(visibleEvents), [visibleEvents]);
   const conflictedEventIds = useMemo(() => getConflictedEventIds(visibleEvents), [visibleEvents]);
   const joinDefaults = currentUser
@@ -894,6 +898,80 @@ export default function CalendarView() {
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
+  }
+
+  function toggleAccount(accountId: string) {
+    setHiddenAccountIds((prev) => {
+      const next = new Set(prev);
+      next.has(accountId) ? next.delete(accountId) : next.add(accountId);
+      return next;
+    });
+  }
+
+  async function removeConnectedAccount(account: ConnectedAccount) {
+    const confirmed = window.confirm(`Disconnect ${account.google_email} from this room? Its synced events will be removed from this view.`);
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch('/api/google/accounts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: account.id }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Could not disconnect Google account');
+
+      setConnectedAccounts((prev) => prev.filter((candidate) => candidate.id !== account.id));
+      setHiddenAccountIds((prev) => {
+        const next = new Set(prev);
+        next.delete(account.id);
+        return next;
+      });
+      setAccountColorOverrides((prev) => {
+        if (!authUser) return prev;
+        const next = { ...prev };
+        delete next[account.id];
+        window.localStorage.setItem(getAccountColorStorageKey(authUser.email), JSON.stringify(next));
+        return next;
+      });
+      setEvents((prev) => {
+        const nextEvents = prev.filter((event) => event.extendedProps.accountId !== account.id);
+        persistEventCache(nextEvents);
+        return nextEvents;
+      });
+      if (selectedAccountId === account.id) {
+        const nextAccount = connectedAccounts.find((candidate) => candidate.id !== account.id);
+        setSelectedAccountId(nextAccount?.id || '');
+      }
+      setRoomNotice('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not disconnect Google account';
+      setRoomNotice(message);
+    }
+  }
+
+  function startAccountLongPress(account: ConnectedAccount) {
+    accountLongPressTriggered.current = false;
+    if (accountLongPressTimer.current) window.clearTimeout(accountLongPressTimer.current);
+    accountLongPressTimer.current = window.setTimeout(() => {
+      accountLongPressTriggered.current = true;
+      void removeConnectedAccount(account);
+    }, 650);
+  }
+
+  function cancelAccountLongPress() {
+    if (accountLongPressTimer.current) {
+      window.clearTimeout(accountLongPressTimer.current);
+      accountLongPressTimer.current = null;
+    }
+  }
+
+  function handleAccountClick(accountId: string) {
+    if (accountLongPressTriggered.current) {
+      accountLongPressTriggered.current = false;
+      return;
+    }
+    toggleAccount(accountId);
   }
 
   function handleDateSelect(selection: DateSelectArg) {
@@ -1034,8 +1112,9 @@ export default function CalendarView() {
             <div className="connected-account-list">
               {connectedAccounts.map((account) => {
                 const accountColor = accountColorOverrides[account.id] || account.base_color || '#828DB0';
+                const isAccountHidden = hiddenAccountIds.has(account.id);
                 return (
-                  <div key={account.id} className="connected-account-item">
+                  <div key={account.id} className={`connected-account-item ${isAccountHidden ? 'dimmed' : ''}`}>
                     <input
                       type="color"
                       className="account-color-input"
@@ -1044,10 +1123,20 @@ export default function CalendarView() {
                       title={`Change colour for ${account.google_email}`}
                       aria-label={`Change colour for ${account.google_email}`}
                     />
-                    <span className="account-legend-copy">
+                    <button
+                      type="button"
+                      className="account-legend-button"
+                      onClick={() => handleAccountClick(account.id)}
+                      onPointerDown={() => startAccountLongPress(account)}
+                      onPointerUp={cancelAccountLongPress}
+                      onPointerLeave={cancelAccountLongPress}
+                      onPointerCancel={cancelAccountLongPress}
+                      title="Click to hide/show. Long press to disconnect."
+                      aria-pressed={isAccountHidden}
+                    >
                       <strong>{account.user_nickname || currentUser.nickname}</strong>
                       <span>{account.google_email}</span>
-                    </span>
+                    </button>
                   </div>
                 );
               })}

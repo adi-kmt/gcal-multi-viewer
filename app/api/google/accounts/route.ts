@@ -45,3 +45,30 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: message === 'Not authenticated with Google' ? 401 : 500 });
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const appUserId = getAppUserId(req);
+    const { accountId } = await req.json();
+
+    if (!accountId) {
+      return NextResponse.json({ error: 'accountId is required' }, { status: 400 });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('connected_google_accounts')
+      .delete()
+      .eq('app_user_id', appUserId)
+      .eq('id', accountId)
+      .select('id, google_email')
+      .maybeSingle();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data) return NextResponse.json({ error: 'Google account not found' }, { status: 404 });
+
+    return NextResponse.json({ account: data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not remove Google account';
+    return NextResponse.json({ error: message }, { status: message === 'Not authenticated with Google' ? 401 : 500 });
+  }
+}

@@ -205,25 +205,36 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 12px;
 }
 
-.account-legend-copy {
+.account-legend-button {
   min-width: 0;
   display: grid;
   gap: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
 }
 
-.account-legend-copy strong,
-.account-legend-copy span {
+.account-legend-button:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.account-legend-button strong,
+.account-legend-button span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.account-legend-copy strong {
+.account-legend-button strong {
   color: var(--text-primary);
   font-size: 12px;
 }
 
-.account-legend-copy span {
+.account-legend-button span {
   color: var(--text-tertiary);
   font-size: 11px;
 }
