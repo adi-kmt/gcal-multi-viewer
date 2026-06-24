@@ -890,8 +890,74 @@ input {
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
+.fc .fc-daygrid-more-link {
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.fc .fc-daygrid-more-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--gold-bright);
+  text-decoration: none;
+}
+
+.fc-theme-standard .fc-popover {
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid rgba(255, 226, 154, 0.18) !important;
+  border-radius: 10px;
+  background: var(--surface-2) !important;
+  color: var(--text-primary);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  z-index: 20;
+}
+
+.fc-theme-standard .fc-popover-header {
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-color) !important;
+  color: var(--text-primary);
+}
+
+.fc .fc-popover-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.fc .fc-popover-close {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+.fc .fc-popover-close:hover {
+  color: var(--gold-bright);
+}
+
+.fc .fc-popover-body {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: var(--surface-2);
+}
+
+.fc .fc-popover-body .fc-event {
+  margin: 0 !important;
+  min-height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+}
+
+.fc .fc-popover-body .fc-event-main {
+  min-width: 0;
+}
+
 /* Custom Event Styling via eventContent */
 .custom-event {
+  min-width: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -941,6 +1007,8 @@ input {
 }
 
 .custom-event .event-title {
+  min-width: 0;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
