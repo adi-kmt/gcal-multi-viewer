@@ -29,13 +29,6 @@ export async function GET(req: NextRequest) {
     const oauth2Client = getOAuthClient();
     const { tokens } = await oauth2Client.getToken(code);
 
-    if (!tokens.refresh_token) {
-      return NextResponse.json(
-        { error: 'No refresh token returned. Try removing app access in Google Account settings and reconnect.' },
-        { status: 400 },
-      );
-    }
-
     oauth2Client.setCredentials(tokens);
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const { data: profile } = await oauth2.userinfo.get();
@@ -62,6 +55,21 @@ export async function GET(req: NextRequest) {
     const appUserId = isConnectFlow
       ? existingUser.email.toLowerCase()
       : linkedAccount?.app_user_id || profile.email.toLowerCase();
+
+    const { data: currentAccount } = await supabaseAdmin
+      .from('connected_google_accounts')
+      .select('refresh_token')
+      .eq('app_user_id', appUserId)
+      .eq('google_email', profile.email)
+      .maybeSingle();
+
+    const refreshToken = tokens.refresh_token || currentAccount?.refresh_token;
+    if (!refreshToken) {
+      return NextResponse.json(
+        { error: 'No refresh token returned. Try removing app access in Google Account settings and reconnect.' },
+        { status: 400 },
+      );
+    }
 
     if (!isConnectFlow) {
       setSessionCookie(response, {
@@ -91,7 +99,7 @@ export async function GET(req: NextRequest) {
     const { error } = await supabaseAdmin.from('connected_google_accounts').upsert({
       app_user_id: appUserId,
       google_email: profile.email,
-      refresh_token: tokens.refresh_token,
+      refresh_token: refreshToken,
       access_token: tokens.access_token,
       expiry_date: tokens.expiry_date,
       room_id: existingAccount?.room_id || existingMember?.room_id || null,

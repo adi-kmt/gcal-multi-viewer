@@ -27,19 +27,49 @@ export async function GET(req: NextRequest) {
     const timeMin = req.nextUrl.searchParams.get('timeMin') || new Date().toISOString();
     const timeMax = req.nextUrl.searchParams.get('timeMax') || new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
     const accountId = req.nextUrl.searchParams.get('accountId');
+    const roomCode = req.nextUrl.searchParams.get('roomCode')?.trim().toUpperCase();
 
     if (Number.isNaN(Date.parse(timeMin)) || Number.isNaN(Date.parse(timeMax)) || Date.parse(timeMin) >= Date.parse(timeMax)) {
       return NextResponse.json({ error: 'timeMin and timeMax must be valid date-times, with timeMax after timeMin' }, { status: 400 });
     }
 
     const appUserId = getAppUserId(req);
+    let roomId: string | null = null;
+
+    if (roomCode) {
+      const { data: room, error: roomError } = await supabaseAdmin
+        .from('rooms')
+        .select('id')
+        .eq('room_code', roomCode)
+        .single();
+
+      if (roomError || !room) {
+        return NextResponse.json({ error: 'Room not found' }, { status: 404 });
+      }
+
+      const { data: member, error: memberError } = await supabaseAdmin
+        .from('room_members')
+        .select('id')
+        .eq('room_id', room.id)
+        .eq('app_user_id', appUserId)
+        .maybeSingle();
+
+      if (memberError) return NextResponse.json({ error: memberError.message }, { status: 500 });
+      if (!member) return NextResponse.json({ error: 'Not a member of this room' }, { status: 403 });
+
+      roomId = room.id;
+    }
+
     let accountQuery = supabaseAdmin
       .from('connected_google_accounts')
-      .select('*')
-      .eq('app_user_id', appUserId);
+      .select('*');
+
+    accountQuery = roomId
+      ? accountQuery.eq('room_id', roomId)
+      : accountQuery.eq('app_user_id', appUserId);
 
     if (accountId) {
-      accountQuery = accountQuery.eq('id', accountId);
+      accountQuery = accountQuery.eq('id', accountId).eq('app_user_id', appUserId);
     }
 
     const { data: accounts, error } = await accountQuery;

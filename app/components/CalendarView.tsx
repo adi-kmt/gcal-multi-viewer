@@ -77,6 +77,7 @@ type LoadEventsOptions = {
   mode?: 'replace' | 'missing';
   knownEvents?: CalendarEvent[];
   accountId?: string;
+  roomCode?: string;
 };
 
 function getRoomStorageKey(email: string) {
@@ -105,6 +106,19 @@ function readStoredAccountColors(email: string): AccountColorMap {
     window.localStorage.removeItem(getAccountColorStorageKey(email));
     return {};
   }
+}
+
+function getDefaultEventSelection() {
+  const start = new Date();
+  start.setMinutes(0, 0, 0);
+  start.setHours(start.getHours() + 1);
+  const end = new Date(start);
+  end.setHours(start.getHours() + 1);
+
+  return {
+    startStr: start.toISOString(),
+    endStr: end.toISOString(),
+  };
 }
 
 function GoogleAuthScreen() {
@@ -597,8 +611,9 @@ export default function CalendarView() {
         }
       }
       void loadGoogleEvents(persisted.currentUser, {
-        mode: cachedEvents.length > 0 ? 'missing' : 'replace',
+        mode: 'replace',
         knownEvents: cachedEvents,
+        roomCode: persisted.room.roomCode,
       });
     } catch {
       window.localStorage.removeItem(getRoomStorageKey(authUser.email));
@@ -629,7 +644,7 @@ export default function CalendarView() {
     return Array.from(byId.values());
   }
 
-  async function fetchGoogleEventsForRange(me: UserSlot, accountId?: string) {
+  async function fetchGoogleEventsForRange(me: UserSlot, accountId?: string, roomCode?: string) {
     const timeMin = new Date();
     timeMin.setDate(timeMin.getDate() - 14);
     const timeMax = new Date();
@@ -639,6 +654,7 @@ export default function CalendarView() {
       timeMax: timeMax.toISOString(),
     });
     if (accountId) params.set('accountId', accountId);
+    if (roomCode) params.set('roomCode', roomCode);
 
     const response = await fetch(`/api/google/events?${params.toString()}`);
     const body = await response.json();
@@ -679,11 +695,12 @@ export default function CalendarView() {
           ? accounts.map((account) => account.id).filter((id) => !knownAccountIds.has(id))
           : [];
 
+      const activeRoomCode = options.roomCode || room?.roomCode;
       const fetchedEvents = options.mode === 'missing'
         ? accountIdsToFetch.length > 0
-          ? (await Promise.all(accountIdsToFetch.map((accountId) => fetchGoogleEventsForRange(me, accountId)))).flat()
+          ? (await Promise.all(accountIdsToFetch.map((accountId) => fetchGoogleEventsForRange(me, accountId, activeRoomCode)))).flat()
           : []
-        : await fetchGoogleEventsForRange(me, options.accountId);
+        : await fetchGoogleEventsForRange(me, options.accountId, activeRoomCode);
 
       const googleEvents = applyAccountColor(fetchedEvents, activeOverrides);
       const nextEvents = options.mode === 'missing'
@@ -750,7 +767,9 @@ export default function CalendarView() {
       setRoomNotice('');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Room sync failed';
-      setRoomNotice(`Using a local room preview because backend room sync failed: ${message}`);
+      setRoomNotice(`Room sync failed: ${message}`);
+      window.alert(`Room sync failed: ${message}`);
+      return;
     }
 
     const newRoom: RoomState = {
@@ -761,7 +780,7 @@ export default function CalendarView() {
     };
 
     enterRoom(newRoom, me, []);
-    await loadGoogleEvents(me);
+    await loadGoogleEvents(me, { roomCode: newRoom.roomCode });
   }
 
   const visibleEvents = events.filter((ev) => {
@@ -817,7 +836,11 @@ export default function CalendarView() {
           calendarName: currentUser.calendars[0]?.name || 'Work',
         },
       };
-      setEvents((prev) => [...prev, newEv]);
+      setEvents((prev) => {
+        const nextEvents = [...prev, newEv];
+        persistEventCache(nextEvents);
+        return nextEvents;
+      });
       setLastSynced(new Date());
       setIsSubmitting(false);
       setIsModalOpen(false);
@@ -908,7 +931,14 @@ export default function CalendarView() {
           </a>
         </div>
 
-        <button className="primary-btn new-event-btn" onClick={() => setIsModalOpen(true)}>
+        <button
+          className="primary-btn new-event-btn"
+          onClick={() => {
+            setModalSelection(getDefaultEventSelection());
+            setEventTitle('');
+            setIsModalOpen(true);
+          }}
+        >
           + New Event
         </button>
 
