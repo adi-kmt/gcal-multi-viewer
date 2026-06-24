@@ -61,6 +61,7 @@ type ConnectedAccount = {
   created_at: string;
   user_nickname?: string | null;
   base_color?: string | null;
+  can_disconnect?: boolean;
 };
 
 type AccountColorMap = Record<string, string>;
@@ -221,12 +222,18 @@ function darkenHex(hex: string, amount: number) {
   return hslToHex(h, Math.min(80, s + 10), Math.max(10, l - amount));
 }
 
+function lightenHex(hex: string, amount: number) {
+  const [h, s, l] = hexToHsl(/^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#828DB0');
+  return hslToHex(h, Math.max(35, Math.min(70, s)), Math.min(84, l + amount));
+}
+
 function getReadableEventStyle(baseColor: string) {
   const safeColor = /^#[0-9a-fA-F]{6}$/.test(baseColor) ? baseColor : '#828DB0';
+  const fill = lightenHex(safeColor, 20);
   return {
-    backgroundColor: hexToRgba(safeColor, 0.7),
-    borderColor: darkenHex(safeColor, 34),
-    textColor: darkenHex(safeColor, 48),
+    backgroundColor: hexToRgba(fill, 0.88),
+    borderColor: darkenHex(safeColor, 24),
+    textColor: darkenHex(safeColor, 38),
   };
 }
 
@@ -564,6 +571,7 @@ export default function CalendarView() {
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
   const [accountColorOverrides, setAccountColorOverrides] = useState<AccountColorMap>({});
   const [savedJoinDefaults, setSavedJoinDefaults] = useState<JoinDefaults | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -577,9 +585,11 @@ export default function CalendarView() {
   const accountLongPressTimer = useRef<number | null>(null);
   const accountLongPressTriggered = useRef(false);
 
-  async function loadConnectedAccounts(overrides = accountColorOverrides): Promise<ConnectedAccount[]> {
+  async function loadConnectedAccounts(overrides = accountColorOverrides, roomCode?: string): Promise<ConnectedAccount[]> {
     try {
-      const response = await fetch('/api/google/accounts');
+      const params = new URLSearchParams();
+      if (roomCode) params.set('roomCode', roomCode);
+      const response = await fetch(`/api/google/accounts${params.size ? `?${params.toString()}` : ''}`);
       if (!response.ok) return [];
       const body = await response.json();
       const accounts = ((body.accounts || []) as ConnectedAccount[]).map((account) => ({
@@ -770,8 +780,9 @@ export default function CalendarView() {
     setIsLoadingEvents(true);
     try {
       const activeOverrides = authUser ? readStoredAccountColors(authUser.email) : accountColorOverrides;
-      const accounts = await loadConnectedAccounts(activeOverrides);
       const existingEvents = options.knownEvents || events;
+      const activeRoomCode = options.roomCode || room?.roomCode;
+      const accounts = await loadConnectedAccounts(activeOverrides, activeRoomCode);
       const knownAccountIds = new Set(
         existingEvents
           .map((event) => event.extendedProps.accountId)
@@ -783,7 +794,6 @@ export default function CalendarView() {
           ? accounts.map((account) => account.id).filter((id) => !knownAccountIds.has(id))
           : [];
 
-      const activeRoomCode = options.roomCode || room?.roomCode;
       const fetchedEvents = options.mode === 'missing'
         ? accountIdsToFetch.length > 0
           ? (await Promise.all(accountIdsToFetch.map((accountId) => fetchGoogleEventsForRange(me, accountId, activeRoomCode)))).flat()
@@ -909,6 +919,11 @@ export default function CalendarView() {
   }
 
   async function removeConnectedAccount(account: ConnectedAccount) {
+    if (!account.can_disconnect) {
+      setRoomNotice('You can hide this account, but only its owner can disconnect it.');
+      return;
+    }
+
     const confirmed = window.confirm(`Disconnect ${account.google_email} from this room? Its synced events will be removed from this view.`);
     if (!confirmed) return;
 
@@ -951,6 +966,7 @@ export default function CalendarView() {
   }
 
   function startAccountLongPress(account: ConnectedAccount) {
+    if (!account.can_disconnect) return;
     accountLongPressTriggered.current = false;
     if (accountLongPressTimer.current) window.clearTimeout(accountLongPressTimer.current);
     accountLongPressTimer.current = window.setTimeout(() => {
@@ -1079,7 +1095,16 @@ export default function CalendarView() {
   }
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <button
+        type="button"
+        className="sidebar-toggle"
+        onClick={() => setIsSidebarCollapsed((value) => !value)}
+        aria-label={isSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        title={isSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+      >
+        {isSidebarCollapsed ? '›' : '‹'}
+      </button>
       {/* ── Sidebar ── */}
       <div className="sidebar">
         <div className="sidebar-logo">
@@ -1131,10 +1156,13 @@ export default function CalendarView() {
                       onPointerUp={cancelAccountLongPress}
                       onPointerLeave={cancelAccountLongPress}
                       onPointerCancel={cancelAccountLongPress}
-                      title="Click to hide/show. Long press to disconnect."
+                      title={account.can_disconnect ? 'Click to hide/show. Long press to disconnect.' : 'Click to hide/show.'}
                       aria-pressed={isAccountHidden}
                     >
-                      <strong>{account.user_nickname || currentUser.nickname}</strong>
+                      <span className="account-name-line">
+                        <strong>{account.user_nickname || currentUser.nickname}</strong>
+                        {!account.can_disconnect && <em>room</em>}
+                      </span>
                       <span>{account.google_email}</span>
                     </button>
                   </div>
@@ -1220,31 +1248,35 @@ export default function CalendarView() {
             </span>
           </div>
         )}
-        <FullCalendar
-          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-          initialView="timeGridWeek"
-          headerToolbar={{
-            left: 'prev,next today',
-            center: 'title',
-            right: 'dayGridMonth,timeGridWeek,timeGridDay',
-          }}
-          events={visibleEvents}
-          selectable
-          selectMirror
-          select={handleDateSelect}
-          dateClick={handleDateClick}
-          eventContent={renderEventContent}
-          height="100%"
-          dayMaxEvents={true}
-          eventMaxStack={4}
-          slotEventOverlap={false}
-          slotLabelFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
-          eventClick={(info: EventClickArg) => {
-            const user = info.event.extendedProps.userNickname;
-            const cal = info.event.extendedProps.calendarName;
-            alert(`${info.event.title}\nBy: ${user} (${cal})`);
-          }}
-        />
+        <div className="calendar-scroll">
+          <div className="calendar-canvas">
+            <FullCalendar
+              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+              initialView="timeGridWeek"
+              headerToolbar={{
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth,timeGridWeek,timeGridDay',
+              }}
+              events={visibleEvents}
+              selectable
+              selectMirror
+              select={handleDateSelect}
+              dateClick={handleDateClick}
+              eventContent={renderEventContent}
+              height="100%"
+              dayMaxEvents={true}
+              eventMaxStack={4}
+              slotEventOverlap={false}
+              slotLabelFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
+              eventClick={(info: EventClickArg) => {
+                const user = info.event.extendedProps.userNickname;
+                const cal = info.event.extendedProps.calendarName;
+                alert(`${info.event.title}\nBy: ${user} (${cal})`);
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* ── New Event Modal ── */}
